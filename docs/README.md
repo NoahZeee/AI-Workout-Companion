@@ -27,9 +27,6 @@ A Python application that uses pose estimation to provide real-time workout feed
 ### Quick Setup
 
 ```bash
-# Navigate to project directory
-cd "424 Final"
-
 # Install dependencies (one command)
 pip install opencv-python mediapipe numpy
 ```

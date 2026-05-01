@@ -226,20 +226,24 @@ Tune angle thresholds, confidence levels, and form validation in individual anal
 ## 📁 File Manifest
 
 ```
-d:\424 Final\
-├── main.py                      # Entry point
-├── pose_detector.py             # Pose estimation (demo + framework)
-├── exercise_analyzer.py         # Push-up & bicep curl analyzers
-├── feedback_generator.py        # Real-time feedback display
-├── video_processor.py           # Video I/O & main loop
-├── README.md                    # User documentation
-├── IMPLEMENTATION_GUIDE.md      # Guide for real pose detection
-├── create_test_video.py         # Test video generator
-├── test_mediapipe.py            # MediaPipe compatibility test
-├── download_model.py            # Model download utility
-├── test_video.mp4              # Generated test video
-├── test_output.mp4             # Test output (from successful run)
-└── PROJECT_SUMMARY.md          # This file
+AI-Workout-Companion/
+├── run.py                       # Entry point
+├── src/
+│   ├── main.py                 # CLI interface
+│   ├── pose_detector.py        # Pose estimation (MediaPipe integration)
+│   ├── exercise_analyzer.py    # Push-up & bicep curl analyzers
+│   ├── feedback_generator.py   # Real-time feedback display
+│   └── video_processor.py      # Video I/O & main loop
+├── docs/
+│   ├── README.md               # User documentation
+│   ├── QUICKSTART.md           # Quick start guide
+│   ├── PROJECT_SUMMARY.md      # This file
+│   └── REAL_DETECTION_READY.md # MediaPipe details
+├── data/
+│   ├── test_video.mp4          # Generated test video
+│   ├── create_test_video.py    # Test video generator
+│   └── pose_landmarker_lite.task # MediaPipe model (auto-downloaded)
+└── outputs/                     # Generated analysis videos
 ```
 
 ---
