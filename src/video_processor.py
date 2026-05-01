@@ -147,6 +147,10 @@ class VideoProcessor:
                 device_id = int(input_source)
                 print(f"Opening webcam (device {device_id})...")
                 cap = cv2.VideoCapture(device_id)
+                
+                # Set webcam to 720p (1280x720) for better quality
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             else:
                 # Treat as file path
                 if not Path(input_source).exists():

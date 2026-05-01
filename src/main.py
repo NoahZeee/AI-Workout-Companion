@@ -78,6 +78,7 @@ Examples:
 def create_output_path(base_name: str = "workout_output") -> str:
     """
     Create output file path with timestamp if not specified.
+    Saves to outputs/ folder by default.
     
     Args:
         base_name: Base name for output file
@@ -85,8 +86,12 @@ def create_output_path(base_name: str = "workout_output") -> str:
     Returns:
         Output file path
     """
+    # Ensure outputs directory exists
+    output_dir = Path("outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{base_name}_{timestamp}.mp4"
+    return str(output_dir / f"{base_name}_{timestamp}.mp4")
 
 
 def main():
