@@ -2,12 +2,11 @@
 pose_detector.py - Real Pose Detection using MediaPipe
 
 Uses MediaPipe Pose Landmarker for accurate real-time pose estimation.
-Supports automatic model download and graceful fallback.
 """
 
 import cv2
 import numpy as np
-from typing import Tuple, Optional, Dict, List
+from typing import Tuple, Optional, List
 from pathlib import Path
 import os
 import urllib.request
@@ -15,15 +14,14 @@ import urllib.request
 
 class PoseDetector:
     """
-    Real-time pose detector using OpenCV DNN models.
+    Real-time pose detector using MediaPipe Pose Landmarker.
     
-    Uses pre-trained caffeemodel weights that are already available via OpenCV.
-    17 keypoints (COCO format):
+    Outputs 17 keypoints in COCO format:
     0: Nose, 1-2: Eyes, 3-4: Ears, 5-6: Shoulders, 7-8: Elbows, 9-10: Wrists,
     11-12: Hips, 13-14: Knees, 15-16: Ankles
     """
     
-    # OpenCV COCO landmark indices
+    # COCO 17-point landmark indices
     LANDMARKS = {
         "NOSE": 0,
         "LEFT_EYE": 1,
@@ -44,199 +42,155 @@ class PoseDetector:
         "RIGHT_ANKLE": 16,
     }
     
-    # Using pre-trained models from OpenCV samples
+    # MediaPipe 33-point to COCO 17-point mapping
+    # MediaPipe indices: https://mediapipe.dev/images/mobile/pose_tracking_full_body_landmarks.png
+    MEDIAPIPE_TO_COCO = [
+        0,   # 0: Nose -> 0
+        2,   # 1: Left Eye -> 1
+        5,   # 2: Right Eye -> 2
+        7,   # 3: Left Ear -> 3
+        8,   # 4: Right Ear -> 4
+        11,  # 5: Left Shoulder -> 5
+        12,  # 6: Right Shoulder -> 6
+        13,  # 7: Left Elbow -> 7
+        14,  # 8: Right Elbow -> 8
+        15,  # 9: Left Wrist -> 9
+        16,  # 10: Right Wrist -> 10
+        23,  # 11: Left Hip -> 11
+        24,  # 12: Right Hip -> 12
+        25,  # 13: Left Knee -> 13
+        26,  # 14: Right Knee -> 14
+        27,  # 15: Left Ankle -> 15
+        28,  # 16: Right Ankle -> 16
+    ]
+    
     def __init__(self, min_detection_confidence: float = 0.7, 
                  min_tracking_confidence: float = 0.7):
         """
-        Initialize real pose detector using OpenCV DNN.
+        Initialize pose detector using MediaPipe.
         
         Args:
             min_detection_confidence: Minimum confidence for pose detection [0-1]
-            min_tracking_confidence: Not used in OpenCV but kept for API compatibility
+            min_tracking_confidence: Minimum confidence for tracking [0-1]
         """
-        self.confidence_threshold = min_detection_confidence
-        self.inWidth = 368
-        self.inHeight = 368
-        self.threshold = 0.1
+        self.min_detection_confidence = min_detection_confidence
+        self.min_tracking_confidence = min_tracking_confidence
+        self.pose_landmarker = None
         self.frame_count = 0
         
-        # Try to load pre-trained models
         self._initialize_model()
-        print("[OK] Real pose detector initialized (MediaPipe)")
+        print("[OK] Real pose detector initialized (MediaPipe Pose Landmarker)")
     
     def _initialize_model(self):
-        """Initialize pose detector with MediaPipe Tasks API (with auto-download)."""
+        """Initialize MediaPipe Pose Landmarker model."""
         try:
             from mediapipe.tasks import python
             from mediapipe.tasks.python import vision
             
-            print("  [*] Initializing MediaPipe Pose Landmarker...")
+            print("  [*] Loading MediaPipe Pose Landmarker model...")
             
-            # Download model if not present
+            # Model path
             model_path = 'data/pose_landmarker_lite.task'
+            
+            # Download if missing
             if not os.path.exists(model_path):
-                print("      Downloading model (~100 MB)...")
+                print("      Model not found. Downloading (~7 MB)...")
                 self._download_model(model_path)
             
-            # Initialize MediaPipe
-            base_options = python.BaseOptions(
-                model_asset_path=model_path
-            )
+            # Create pose landmarker
+            base_options = python.BaseOptions(model_asset_path=model_path)
             options = vision.PoseLandmarkerOptions(
                 base_options=base_options,
                 output_segmentation_masks=False,
                 num_poses=1
             )
             self.pose_landmarker = vision.PoseLandmarker.create_from_options(options)
-            self.use_mediapipe = True
             print("  [OK] MediaPipe Pose Landmarker loaded successfully!")
-            print("      Using 33-point detection (real body joints)")
             
+        except ImportError as e:
+            print(f"  [!] Error: MediaPipe not installed: {e}")
+            print("      Please run: pip install mediapipe opencv-python numpy")
+            raise
         except Exception as e:
-            print(f"  [!] MediaPipe setup failed: {e}")
-            print("  Falling back to hybrid pose detection mode...")
-            self.pose_landmarker = None
-            self.use_mediapipe = False
+            print(f"  [!] Error initializing MediaPipe: {e}")
+            raise
     
     def _download_model(self, model_path: str):
         """Download MediaPipe pose landmarker model."""
         try:
             url = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
-            print(f"      Downloading from: {url}")
+            
+            # Create data directory if needed
+            Path(model_path).parent.mkdir(parents=True, exist_ok=True)
             
             def download_progress(block_num, block_size, total_size):
                 downloaded = block_num * block_size
-                percent = min(downloaded * 100 // total_size, 100)
-                print(f"\r      [{percent:3d}%] Downloaded {downloaded // (1024*1024)} MB", end='')
+                if total_size > 0:
+                    percent = min(downloaded * 100 // total_size, 100)
+                    print(f"\r      [{percent:3d}%] {downloaded // (1024*1024)} MB / {total_size // (1024*1024)} MB", end='')
             
             urllib.request.urlretrieve(url, model_path, download_progress)
-            print(f"\n      [OK] Model downloaded successfully to {model_path}")
+            print(f"\n      [OK] Model downloaded to {model_path}")
             
         except Exception as e:
-            print(f"      [!] Download failed: {e}")
-            print("      Will use fallback pose detection")
+            print(f"  [!] Download failed: {e}")
+            raise
     
     def detect_pose(self, frame: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """
-        Detect pose keypoints using MediaPipe or fallback.
+        Detect pose landmarks in a frame.
         
         Args:
-            frame: BGR image frame (from OpenCV)
+            frame: BGR image frame (OpenCV format)
             
         Returns:
-            Tuple of (landmarks, visibility) with real pose data
+            Tuple of (landmarks, visibility):
+            - landmarks: Nx3 array of [x, y, z] in normalized coordinates [0, 1]
+            - visibility: N array of confidence scores [0, 1]
+            Returns (None, None) if no pose detected
         """
-        if self.use_mediapipe:
-            return self._detect_pose_mediapipe(frame)
-        else:
-            return self._detect_pose_fallback(frame)
-    
-    def _detect_pose_mediapipe(self, frame: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Detect pose using MediaPipe (33 points)."""
         try:
             import mediapipe as mp
             
+            self.frame_count += 1
+            
+            # Convert BGR to RGB
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Create MediaPipe Image
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             
+            # Run detection
             detection_result = self.pose_landmarker.detect(mp_image)
             
+            # Check if pose detected
             if not detection_result.pose_landmarks or len(detection_result.pose_landmarks) == 0:
                 return None, None
             
-            # Get first detected person's landmarks (33 points in MediaPipe)
+            # Get first detected pose
             mediapipe_landmarks = detection_result.pose_landmarks[0]
             
-            # Map MediaPipe 33-point format to COCO 17-point format
-            # MediaPipe indices: shoulders(11,12), elbows(13,14), wrists(15,16),
-            #                    hips(23,24), knees(25,26), ankles(27,28)
-            coco_mapping = [
-                0,   # 0: Nose (0)
-                1,   # 1: Left Eye (1)
-                2,   # 2: Right Eye (2)
-                3,   # 3: Left Ear (3)
-                4,   # 4: Right Ear (4)
-                11,  # 5: Left Shoulder (11)
-                12,  # 6: Right Shoulder (12)
-                13,  # 7: Left Elbow (13)
-                14,  # 8: Right Elbow (14)
-                15,  # 9: Left Wrist (15)
-                16,  # 10: Right Wrist (16)
-                23,  # 11: Left Hip (23)
-                24,  # 12: Right Hip (24)
-                25,  # 13: Left Knee (25)
-                26,  # 14: Right Knee (26)
-                27,  # 15: Left Ankle (27)
-                28,  # 16: Right Ankle (28)
-            ]
-            
+            # Map from MediaPipe 33-point to COCO 17-point
             landmarks = []
             visibility = []
             
-            for coco_idx in coco_mapping:
+            for coco_idx in self.MEDIAPIPE_TO_COCO:
                 lm = mediapipe_landmarks[coco_idx]
                 landmarks.append([lm.x, lm.y, lm.z])
                 visibility.append(lm.visibility)
             
-            if not any(visibility):
+            landmarks = np.array(landmarks, dtype=np.float32)
+            visibility = np.array(visibility, dtype=np.float32)
+            
+            # Validate landmarks are in valid range
+            if np.any(np.isnan(landmarks)) or np.any(np.isnan(visibility)):
                 return None, None
             
-            return np.array(landmarks), np.array(visibility)
+            return landmarks, visibility
             
         except Exception as e:
-            print(f"  Error in MediaPipe detection: {e}")
+            print(f"[!] Error in pose detection: {e}")
             return None, None
-    
-    def _detect_pose_fallback(self, frame: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """
-        Enhanced fallback pose detection with frame analysis.
-        Uses frame analysis to improve synthetic poses.
-        
-        Args:
-            frame: BGR image frame
-            
-        Returns:
-            Tuple of (landmarks, visibility)
-        """
-        self.frame_count += 1
-        
-        # Analyze frame for person position (optional enhancement)
-        frame_h, frame_w = frame.shape[:2]
-        
-        # Generate realistic push-up movement
-        cycle_frame = (self.frame_count % 60) / 60.0
-        depth = 2.0 * (cycle_frame if cycle_frame < 0.5 else 1.0 - cycle_frame)
-        
-        # Add small random jitter to make it more realistic
-        jitter_x = np.sin(self.frame_count * 0.05) * 0.02
-        jitter_y = np.cos(self.frame_count * 0.03) * 0.02
-        
-        # Create skeleton with realistic push-up
-        landmarks = np.array([
-            [0.5 + jitter_x, 0.15 + jitter_y, 0],  # Nose
-            [0.45 + jitter_x, 0.12 + jitter_y, 0],  # LEFT_EYE
-            [0.55 + jitter_x, 0.12 + jitter_y, 0],  # RIGHT_EYE
-            [0.4 + jitter_x, 0.13 + jitter_y, 0],  # LEFT_EAR
-            [0.6 + jitter_x, 0.13 + jitter_y, 0],  # RIGHT_EAR
-            [0.35 + jitter_x, 0.35 + jitter_y, 0],  # LEFT_SHOULDER
-            [0.65 + jitter_x, 0.35 + jitter_y, 0],  # RIGHT_SHOULDER
-            [0.25 + jitter_x, 0.35 + 0.15 * depth + jitter_y, 0],  # LEFT_ELBOW
-            [0.75 + jitter_x, 0.35 + 0.15 * depth + jitter_y, 0],  # RIGHT_ELBOW
-            [0.2 + jitter_x, 0.55 + 0.2 * depth + jitter_y, 0],  # LEFT_WRIST
-            [0.8 + jitter_x, 0.55 + 0.2 * depth + jitter_y, 0],  # RIGHT_WRIST
-            [0.35 + jitter_x, 0.7 + jitter_y, 0],  # LEFT_HIP
-            [0.65 + jitter_x, 0.7 + jitter_y, 0],  # RIGHT_HIP
-            [0.35 + jitter_x, 0.85 + jitter_y, 0],  # LEFT_KNEE
-            [0.65 + jitter_x, 0.85 + jitter_y, 0],  # RIGHT_KNEE
-            [0.35 + jitter_x, 1.0 + jitter_y, 0],  # LEFT_ANKLE
-            [0.65 + jitter_x, 1.0 + jitter_y, 0],  # RIGHT_ANKLE
-        ])
-        
-        # Clamp to valid range
-        landmarks = np.clip(landmarks, 0, 1)
-        visibility = np.ones(17) * 0.9
-        
-        return landmarks, visibility
     
     def calculate_angle(self, point_a: np.ndarray, point_b: np.ndarray, 
                        point_c: np.ndarray) -> float:
@@ -244,20 +198,19 @@ class PoseDetector:
         Calculate angle at point_b formed by points a-b-c.
         
         Args:
-            point_a: First point (x, y, z)
-            point_b: Vertex point (x, y, z)
-            point_c: Third point (x, y, z)
+            point_a: First point [x, y, z]
+            point_b: Vertex point [x, y, z]
+            point_c: Third point [x, y, z]
             
         Returns:
             Angle in degrees (0-180)
         """
-        # Vectors from b to a and b to c
-        ba = point_a - point_b
-        bc = point_c - point_b
+        # Vectors from b to a and b to c (use only x, y)
+        ba = point_a[:2] - point_b[:2]
+        bc = point_c[:2] - point_b[:2]
         
-        # Compute angle using dot product
+        # Compute angle
         cos_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
-        # Clamp to [-1, 1] to avoid numerical issues
         cos_angle = np.clip(cos_angle, -1.0, 1.0)
         angle_rad = np.arccos(cos_angle)
         angle_deg = np.degrees(angle_rad)
@@ -303,7 +256,7 @@ class PoseDetector:
         
         Args:
             frame: BGR image frame
-            landmarks: Nx3 array of pose landmarks (normalized coordinates)
+            landmarks: Nx3 array of normalized [x, y, z] coordinates
             visibility: N array of confidence scores
             confidence_threshold: Only draw keypoints with visibility >= threshold
             
@@ -316,22 +269,26 @@ class PoseDetector:
         frame_landmarks = []
         for lm, vis in zip(landmarks, visibility):
             if vis >= confidence_threshold:
-                x, y = int(lm[0] * w), int(lm[1] * h)
-                frame_landmarks.append((x, y, vis))
+                x = int(lm[0] * w)
+                y = int(lm[1] * h)
+                # Clamp to frame bounds
+                x = max(0, min(x, w - 1))
+                y = max(0, min(y, h - 1))
+                frame_landmarks.append((x, y, float(vis)))
             else:
                 frame_landmarks.append(None)
         
-        # Define pose connections (COCO 17-point format)
+        # Pose skeleton connections (COCO 17-point format)
         connections = [
-            (0, 1), (0, 2),  # nose to eyes
-            (1, 3), (2, 4),  # eyes to ears
-            (5, 6),  # shoulders
-            (5, 7), (7, 9),  # left arm
-            (6, 8), (8, 10),  # right arm
-            (5, 11), (6, 12),  # shoulders to hips
-            (11, 12),  # hips
-            (11, 13), (13, 15),  # left leg
-            (12, 14), (14, 16),  # right leg
+            (0, 1), (0, 2),           # Nose to eyes
+            (1, 3), (2, 4),           # Eyes to ears
+            (5, 6),                   # Shoulders
+            (5, 7), (7, 9),           # Left arm
+            (6, 8), (8, 10),          # Right arm
+            (5, 11), (6, 12),         # Shoulders to hips
+            (11, 12),                 # Hips
+            (11, 13), (13, 15),       # Left leg
+            (12, 14), (14, 16),       # Right leg
         ]
         
         # Draw connections
@@ -346,8 +303,8 @@ class PoseDetector:
             if landmark is not None:
                 x, y, vis = landmark
                 # Color intensity based on visibility
-                color_intensity = int(255 * vis)
-                cv2.circle(frame, (x, y), 4, (0, 255 - color_intensity, color_intensity), -1)
+                color_val = int(200 * vis)
+                cv2.circle(frame, (x, y), 5, (0, color_val, 255 - color_val), -1)
         
         return frame
     
@@ -367,4 +324,36 @@ class PoseDetector:
         for landmark_name in required_landmarks:
             if self.get_visibility(visibility, landmark_name) < confidence_threshold:
                 return False
-        return True
+        return True    
+    def detect_visible_side(self, visibility: np.ndarray) -> str:
+        """
+        Detect which side of the body is more visible (left or right).
+        Used for side-view exercises where only one side is clearly visible.
+        
+        Args:
+            visibility: N array of confidence scores
+            
+        Returns:
+            'left', 'right', or 'both' based on visibility of arm landmarks
+        """
+        try:
+            left_elbow_vis = self.get_visibility(visibility, "LEFT_ELBOW")
+            right_elbow_vis = self.get_visibility(visibility, "RIGHT_ELBOW")
+            left_wrist_vis = self.get_visibility(visibility, "LEFT_WRIST")
+            right_wrist_vis = self.get_visibility(visibility, "RIGHT_WRIST")
+            
+            left_arm_vis = (left_elbow_vis + left_wrist_vis) / 2
+            right_arm_vis = (right_elbow_vis + right_wrist_vis) / 2
+            
+            # Threshold: consider an arm visible if avg visibility > 0.2
+            left_visible = left_arm_vis > 0.2
+            right_visible = right_arm_vis > 0.2
+            
+            if left_visible and not right_visible:
+                return 'left'
+            elif right_visible and not left_visible:
+                return 'right'
+            else:
+                return 'both'
+        except:
+            return 'both'

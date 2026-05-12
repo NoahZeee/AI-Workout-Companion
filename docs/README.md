@@ -1,12 +1,13 @@
 # Real-Time Workout Form Analyzer
 
-A Python application that uses pose estimation to provide real-time workout feedback, count reps, and analyze exercise form. Built with **MediaPipe Pose Landmarker** and OpenCV.
+A Python application optimized for **side-view workout footage** that uses pose estimation to provide real-time feedback, count reps, and analyze exercise form. Built with **MediaPipe Pose Landmarker** and OpenCV.
 
 ## Features
 
-- **Real-Time Pose Detection**: Uses MediaPipe Pose Landmarker for accurate body pose estimation (73 FPS)
+- **Real-Time Pose Detection**: Uses MediaPipe Pose Landmarker for accurate body pose estimation
+- **Side-View Optimized**: Works with single-side body visibility (left arm OR right arm visible)
 - **Rep Counting**: Automatically counts reps based on exercise-specific angle thresholds
-- **Form Feedback**: Provides real-time guidance on proper form (depth, alignment, symmetry)
+- **Form Feedback**: Provides real-time guidance on proper form (depth, back alignment)
 - **Live Video Display**: Shows pose skeleton (17 keypoints), rep counter, and feedback overlaid on video
 - **Output Video**: Saves annotated video with all feedback and analysis for later review
 - **Extensible Architecture**: Easy to add new exercises by extending the `ExerciseAnalyzer` class
@@ -14,8 +15,8 @@ A Python application that uses pose estimation to provide real-time workout feed
 
 ## Supported Exercises
 
-- **Push-ups**: Tracks elbow flexion, back alignment, arm symmetry, and depth
-- **Bicep Curls**: Tracks elbow angle and arm balance
+- **Push-ups**: Tracks elbow flexion, back alignment, and depth (side-view optimized)
+- **Bicep Curls**: Tracks elbow angle from side perspective
 - **Extensible**: Add squats, deadlifts, pull-ups, planks, etc. (framework ready)
 
 ## Installation
@@ -203,9 +204,8 @@ Rep counter incremented
 ### Form Validation (Push-ups)
 
 Real-time form checks include:
-- **Depth**: Elbow must bend to < 90° for full rep
+- **Depth**: Elbow must bend adequately for full rep
 - **Back Alignment**: Spine should remain neutral (not sagging or arching)
-- **Arm Balance**: Left and right arms should move symmetrically
 
 ## Performance
 
@@ -289,9 +289,7 @@ A: Try higher confidence: `--confidence 0.8` (more stable, fewer detections)
 ## Support
 
 For detailed information, see:
-- [QUICKSTART.md](QUICKSTART.md) - Command examples
-- [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - Architecture details
-- [REAL_DETECTION_READY.md](REAL_DETECTION_READY.md) - MediaPipe setup
+- [QUICKSTART.md](QUICKSTART.md) - Command examples and quick setup
 - [PROJECT_STRUCTURE.md](../PROJECT_STRUCTURE.md) - File organization
 
 

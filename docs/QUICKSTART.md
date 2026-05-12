@@ -1,18 +1,19 @@
 # Quick Start Guide
 
-## 🚀 Run with Real MediaPipe Pose Detection
+## 🚀 Run with Real MediaPipe Pose Detection (Side-View Optimized)
 
 ```bash
 # Test with real pose detection (model auto-downloads on first run)
-python run.py --input data/test_video.mp4 --output outputs/my_analysis.mp4 --no-display
+# Works great with side-view camera angles
+python run.py --exercise push-ups --input data/sample.mp4 --output outputs/my_analysis.mp4 --no-display
 ```
 
 **What it does:**
 - Uses real MediaPipe Pose Landmarker for accurate pose detection
-- Analyzes push-ups (default exercise)
-- Counts reps using real body joint angles
+- Analyzes push-ups (default exercise) from side-view perspective
+- Automatically detects which side of body is visible
+- Counts reps using single-side joint angles
 - Saves annotated video with skeleton overlay and feedback
-- Performance: ~73 FPS with real detection
 
 ## 📹 Analyze Your Workout Video
 
@@ -68,11 +69,9 @@ python main.py --exercise push-ups
 │   └── video_processor.py
 ├── docs/                   ← Documentation
 │   ├── README.md           ← Full user guide
-│   ├── QUICKSTART.md
-│   ├── REAL_DETECTION_READY.md
-│   └── PROJECT_SUMMARY.md
+│   └── QUICKSTART.md       ← This file
 ├── data/                   ← Test data
-│   ├── test_video.mp4
+│   ├── sample.mp4
 │   ├── pose_landmarker_lite.task  (auto-downloaded)
 │   └── create_test_video.py
 └── outputs/                ← Generated videos
@@ -120,8 +119,9 @@ ELBOW_UP_THRESHOLD = 150     # Adjust for your range
 - [x] Real MediaPipe Pose Landmarker integration
 - [x] Automatic model download (5 MB)
 - [x] Rep counting with angle-based state machine
-- [x] Form feedback system (depth, alignment, symmetry)
-- [x] Real-time visualization (73 FPS)
+- [x] Form feedback system (depth, back alignment)
+- [x] Side-view optimized (single-side detection)
+- [x] Automatic arm visibility detection
 - [x] Video file and webcam input/output
 - [x] Clean CLI interface
 - [x] Extensible exercise system

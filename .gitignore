@@ -72,3 +72,5 @@ Thumbs.db
 
 # MediaPipe model cache (auto-downloads)
 mediapipe_models/
+
+handoff.md

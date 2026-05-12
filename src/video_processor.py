@@ -224,7 +224,7 @@ class VideoProcessor:
         
         # Draw pose skeleton
         annotated_frame = self.pose_detector.draw_pose(
-            annotated_frame, landmarks, visibility, confidence_threshold=0.5
+            annotated_frame, landmarks, visibility, confidence_threshold=0.1
         )
         
         # Analyze exercise

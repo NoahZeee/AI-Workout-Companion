@@ -1,11 +1,11 @@
 """
-ExerciseAnalyzer: Base class and concrete implementations for exercise-specific analysis.
-Handles rep counting and form feedback for different workout exercises.
+ExerciseAnalyzer: Exercise-specific analysis for rep counting and form feedback.
+Optimized for single-side (side-view) detection where only one arm is typically visible.
 """
 
 from abc import ABC, abstractmethod
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from pose_detector import PoseDetector
 
 
@@ -24,7 +24,7 @@ class ExerciseAnalyzer(ABC):
         """
         self.pose_detector = pose_detector
         self.rep_count = 0
-        self.in_rep = False  # Track if currently in a rep cycle
+        self.in_rep = False
         self.feedback_messages = []
     
     @abstractmethod
@@ -37,22 +37,13 @@ class ExerciseAnalyzer(ABC):
             visibility: N array of visibility scores
             
         Returns:
-            Dict with keys:
-            - 'rep_count': Current total reps
-            - 'in_rep': Whether currently performing a rep
-            - 'feedback': List of feedback messages
-            - 'form_status': Dict of form metrics
+            Dict with rep count, feedback, and form metrics
         """
         pass
     
     @abstractmethod
     def get_required_landmarks(self) -> List[str]:
-        """
-        Get list of landmarks required for this exercise.
-        
-        Returns:
-            List of landmark names
-        """
+        """Get list of landmarks required for this exercise."""
         pass
     
     def reset(self):
@@ -64,223 +55,25 @@ class ExerciseAnalyzer(ABC):
 
 class PushUpAnalyzer(ExerciseAnalyzer):
     """
-    Analyzes push-ups using elbow angle and form validation.
+    Push-up analyzer optimized for side-view camera angles.
+    Works with only one arm visible (left or right).
     
-    Rep detection logic:
-    - DOWN phase: Elbow angle decreases to < 100°
-    - UP phase: Elbow angle increases to > 150°
-    - One rep counted when transitioning from UP -> DOWN -> UP
+    Rep detection: DOWN (elbow < 100°) -> UP (elbow > 150°) = 1 rep
     """
     
-    # Angle thresholds for rep detection
-    ELBOW_DOWN_THRESHOLD = 100  # Degrees - push-up at bottom
-    ELBOW_UP_THRESHOLD = 150    # Degrees - push-up at top
-    
-    # Form validation thresholds
-    MIN_DEPTH_ANGLE = 90         # Elbow must go below this for valid rep
-    BACK_ANGLE_TOLERANCE = 30    # Degrees - how straight back should be
+    ELBOW_DOWN_THRESHOLD = 100   # Bottom of push-up
+    ELBOW_UP_THRESHOLD = 150     # Top of push-up
+    MIN_DEPTH_ANGLE = 90         # Minimum elbow bend for valid rep
     
     def __init__(self, pose_detector: PoseDetector):
         """Initialize push-up analyzer."""
         super().__init__(pose_detector)
-        self.last_elbow_angle = None
-        self.rep_phase = "up"  # Track phase: "up" or "down"
-        self.max_depth_angle = 180  # Track minimum angle in current rep
+        self.rep_phase = "up"
+        self.max_depth_angle = 180
+        self.active_side = None
     
     def get_required_landmarks(self) -> List[str]:
-        """Push-ups require shoulder, elbow, wrist, hip, knee visibility."""
-        return [
-            "LEFT_SHOULDER", "RIGHT_SHOULDER",
-            "LEFT_ELBOW", "RIGHT_ELBOW",
-            "LEFT_WRIST", "RIGHT_WRIST",
-            "LEFT_HIP", "RIGHT_HIP",
-            "LEFT_KNEE", "RIGHT_KNEE"
-        ]
-    
-    def analyze(self, landmarks: np.ndarray, visibility: np.ndarray) -> Dict:
-        """
-        Analyze push-up form and count reps.
-        
-        Args:
-            landmarks: Nx3 array of pose landmarks
-            visibility: N array of visibility scores
-            
-        Returns:
-            Analysis results
-        """
-        self.feedback_messages = []
-        
-        # Validate required landmarks are visible
-        if not self.pose_detector.is_pose_valid(visibility, self.get_required_landmarks(), 0.5):
-            return {
-                'rep_count': self.rep_count,
-                'in_rep': False,
-                'feedback': ["Ensure shoulders, elbows, and hips are visible"],
-                'form_status': {}
-            }
-        
-        # Calculate key angles
-        left_elbow_angle = self._calculate_elbow_angle(landmarks, "left")
-        right_elbow_angle = self._calculate_elbow_angle(landmarks, "right")
-        avg_elbow_angle = (left_elbow_angle + right_elbow_angle) / 2
-        
-        # Track depth (minimum angle in rep)
-        if avg_elbow_angle < self.max_depth_angle:
-            self.max_depth_angle = avg_elbow_angle
-        
-        # Rep detection state machine
-        self._detect_rep(avg_elbow_angle)
-        
-        # Form validation
-        form_issues = self._validate_form(landmarks, visibility, avg_elbow_angle)
-        
-        return {
-            'rep_count': self.rep_count,
-            'in_rep': self.in_rep,
-            'feedback': self.feedback_messages,
-            'form_status': {
-                'avg_elbow_angle': avg_elbow_angle,
-                'left_elbow_angle': left_elbow_angle,
-                'right_elbow_angle': right_elbow_angle,
-                'form_issues': form_issues
-            }
-        }
-    
-    def _calculate_elbow_angle(self, landmarks: np.ndarray, side: str) -> float:
-        """
-        Calculate elbow angle for a given side.
-        
-        Args:
-            landmarks: Pose landmarks
-            side: "left" or "right"
-            
-        Returns:
-            Elbow angle in degrees
-        """
-        if side == "left":
-            shoulder = self.pose_detector.get_landmark(landmarks, "LEFT_SHOULDER")
-            elbow = self.pose_detector.get_landmark(landmarks, "LEFT_ELBOW")
-            wrist = self.pose_detector.get_landmark(landmarks, "LEFT_WRIST")
-        else:
-            shoulder = self.pose_detector.get_landmark(landmarks, "RIGHT_SHOULDER")
-            elbow = self.pose_detector.get_landmark(landmarks, "RIGHT_ELBOW")
-            wrist = self.pose_detector.get_landmark(landmarks, "RIGHT_WRIST")
-        
-        angle = self.pose_detector.calculate_angle(shoulder, elbow, wrist)
-        return angle
-    
-    def _detect_rep(self, avg_elbow_angle: float):
-        """
-        Detect and count reps using state machine.
-        
-        Args:
-            avg_elbow_angle: Average elbow angle of both arms
-        """
-        # State machine:
-        # UP (angle > 150) -> DOWN (angle < 100) -> UP = 1 rep counted
-        
-        if self.rep_phase == "up" and avg_elbow_angle < self.ELBOW_DOWN_THRESHOLD:
-            # Transitioned to DOWN phase
-            self.rep_phase = "down"
-            self.in_rep = True
-            self.max_depth_angle = avg_elbow_angle
-            self.feedback_messages.append("Going down...")
-        
-        elif self.rep_phase == "down" and avg_elbow_angle > self.ELBOW_UP_THRESHOLD:
-            # Transitioned back to UP phase - rep complete!
-            self.rep_phase = "up"
-            self.rep_count += 1
-            self.in_rep = False
-            self.max_depth_angle = 180
-            self.feedback_messages.append(f"Rep {self.rep_count} complete!")
-    
-    def _validate_form(self, landmarks: np.ndarray, visibility: np.ndarray, 
-                      avg_elbow_angle: float) -> List[str]:
-        """
-        Validate push-up form and return feedback.
-        
-        Args:
-            landmarks: Pose landmarks
-            visibility: Visibility scores
-            avg_elbow_angle: Current average elbow angle
-            
-        Returns:
-            List of form issues
-        """
-        issues = []
-        
-        # Check depth (elbow must go below 90 degrees)
-        if self.in_rep and avg_elbow_angle > self.MIN_DEPTH_ANGLE:
-            issues.append("Go deeper! Elbows should bend more")
-        
-        # Check back alignment
-        back_angle = self._calculate_back_angle(landmarks)
-        if abs(back_angle) > self.BACK_ANGLE_TOLERANCE:
-            if back_angle > 0:
-                issues.append("Back is sagging - keep it straight!")
-            else:
-                issues.append("Back is arching - keep it neutral!")
-        
-        # Check arm symmetry
-        left_elbow = self._calculate_elbow_angle(landmarks, "left")
-        right_elbow = self._calculate_elbow_angle(landmarks, "right")
-        if abs(left_elbow - right_elbow) > 15:
-            issues.append("Arms are uneven - keep balanced")
-        
-        self.feedback_messages.extend(issues)
-        return issues
-    
-    def _calculate_back_angle(self, landmarks: np.ndarray) -> float:
-        """
-        Calculate back angle (spine alignment).
-        Positive = sagging, Negative = arching, ~0 = neutral.
-        
-        Args:
-            landmarks: Pose landmarks
-            
-        Returns:
-            Back angle deviation in degrees
-        """
-        shoulder = (
-            self.pose_detector.get_landmark(landmarks, "LEFT_SHOULDER") +
-            self.pose_detector.get_landmark(landmarks, "RIGHT_SHOULDER")
-        ) / 2
-        hip = (
-            self.pose_detector.get_landmark(landmarks, "LEFT_HIP") +
-            self.pose_detector.get_landmark(landmarks, "RIGHT_HIP")
-        ) / 2
-        
-        # Calculate spine vector (should be vertical when doing push-ups)
-        spine = hip - shoulder
-        
-        # Ideal back is vertical (pointing down in image)
-        # Calculate deviation from vertical using x-component
-        # If spine[0] is large, back is leaning
-        back_angle = np.degrees(np.arctan2(spine[0], -spine[1]))
-        
-        return back_angle
-
-
-class BicepCurlAnalyzer(ExerciseAnalyzer):
-    """
-    Analyzes bicep curls using elbow flexion angle.
-    
-    Rep detection logic:
-    - DOWN phase: Elbow angle increases to > 160° (arm extended)
-    - UP phase: Elbow angle decreases to < 60° (arm flexed)
-    - One rep counted when transitioning from DOWN -> UP -> DOWN
-    """
-    
-    ELBOW_DOWN_THRESHOLD = 160  # Extended arm
-    ELBOW_UP_THRESHOLD = 60     # Flexed arm
-    
-    def __init__(self, pose_detector: PoseDetector):
-        """Initialize bicep curl analyzer."""
-        super().__init__(pose_detector)
-        self.rep_phase = "down"  # Start in down phase
-    
-    def get_required_landmarks(self) -> List[str]:
-        """Bicep curls require shoulder, elbow, wrist visibility."""
+        """Required landmarks: shoulders and one visible arm."""
         return [
             "LEFT_SHOULDER", "RIGHT_SHOULDER",
             "LEFT_ELBOW", "RIGHT_ELBOW",
@@ -289,60 +82,55 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
     
     def analyze(self, landmarks: np.ndarray, visibility: np.ndarray) -> Dict:
         """
-        Analyze bicep curl form and count reps.
-        
-        Args:
-            landmarks: Nx3 array of pose landmarks
-            visibility: N array of visibility scores
-            
-        Returns:
-            Analysis results
+        Analyze push-up from side-view perspective.
+        Detects which side is visible and analyzes only that side.
         """
         self.feedback_messages = []
         
-        # Validate required landmarks
-        if not self.pose_detector.is_pose_valid(visibility, self.get_required_landmarks(), 0.5):
+        # Detect which side is more visible first
+        visible_side = self.pose_detector.detect_visible_side(visibility)
+        self.active_side = visible_side if visible_side != 'both' else 'right'
+        
+        # Validate only the visible side's landmarks + one shoulder
+        if self.active_side == "left":
+            required = ["LEFT_SHOULDER", "LEFT_ELBOW", "LEFT_WRIST"]
+        else:
+            required = ["RIGHT_SHOULDER", "RIGHT_ELBOW", "RIGHT_WRIST"]
+        
+        if not self.pose_detector.is_pose_valid(visibility, required, 0.1):
             return {
                 'rep_count': self.rep_count,
                 'in_rep': False,
-                'feedback': ["Ensure arms are visible"],
+                'feedback': ["Adjust view: arm not visible"],
                 'form_status': {}
             }
         
-        # Calculate average elbow angle for both arms
-        left_elbow = self._calculate_elbow_angle(landmarks, "left")
-        right_elbow = self._calculate_elbow_angle(landmarks, "right")
-        avg_elbow_angle = (left_elbow + right_elbow) / 2
+        # Analyze visible arm
+        elbow_angle = self._calculate_elbow_angle(landmarks, self.active_side)
         
-        # Rep detection
-        self._detect_rep(avg_elbow_angle)
+        # Track minimum angle in current rep
+        if elbow_angle < self.max_depth_angle:
+            self.max_depth_angle = elbow_angle
         
-        # Form validation
-        form_issues = self._validate_form(left_elbow, right_elbow)
+        # Count reps
+        self._detect_rep(elbow_angle)
+        
+        # Validate form
+        form_issues = self._validate_form(landmarks, elbow_angle)
         
         return {
             'rep_count': self.rep_count,
             'in_rep': self.in_rep,
             'feedback': self.feedback_messages,
             'form_status': {
-                'avg_elbow_angle': avg_elbow_angle,
-                'left_elbow_angle': left_elbow,
-                'right_elbow_angle': right_elbow,
+                'elbow_angle': elbow_angle,
+                'visible_side': self.active_side,
                 'form_issues': form_issues
             }
         }
     
     def _calculate_elbow_angle(self, landmarks: np.ndarray, side: str) -> float:
-        """
-        Calculate elbow angle for a given side.
-        
-        Args:
-            landmarks: Pose landmarks
-            side: "left" or "right"
-            
-        Returns:
-            Elbow angle in degrees
-        """
+        """Calculate elbow angle for the visible arm."""
         if side == "left":
             shoulder = self.pose_detector.get_landmark(landmarks, "LEFT_SHOULDER")
             elbow = self.pose_detector.get_landmark(landmarks, "LEFT_ELBOW")
@@ -352,45 +140,135 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
             elbow = self.pose_detector.get_landmark(landmarks, "RIGHT_ELBOW")
             wrist = self.pose_detector.get_landmark(landmarks, "RIGHT_WRIST")
         
-        angle = self.pose_detector.calculate_angle(shoulder, elbow, wrist)
-        return angle
+        return self.pose_detector.calculate_angle(shoulder, elbow, wrist)
     
-    def _detect_rep(self, avg_elbow_angle: float):
-        """
-        Detect and count reps using state machine.
+    def _detect_rep(self, elbow_angle: float):
+        """Detect and count reps using state machine."""
+        if self.rep_phase == "up" and elbow_angle < self.ELBOW_DOWN_THRESHOLD:
+            self.rep_phase = "down"
+            self.in_rep = True
+            self.max_depth_angle = elbow_angle
+            self.feedback_messages.append("Going down...")
         
-        Args:
-            avg_elbow_angle: Average elbow angle of both arms
+        elif self.rep_phase == "down" and elbow_angle > self.ELBOW_UP_THRESHOLD:
+            # Check if rep reached adequate depth before counting
+            if self.max_depth_angle > self.MIN_DEPTH_ANGLE:
+                self.feedback_messages.append("Go deeper!")
+            
+            self.rep_phase = "up"
+            self.rep_count += 1
+            self.in_rep = False
+            self.max_depth_angle = 180
+            self.feedback_messages.append(f"Rep {self.rep_count} complete!")
+    
+    def _validate_form(self, landmarks: np.ndarray, elbow_angle: float) -> List[str]:
         """
-        if self.rep_phase == "down" and avg_elbow_angle < self.ELBOW_UP_THRESHOLD:
-            # Started curling up
+        Validate push-up form. Side-view optimized (no symmetry checks).
+        Depth validation is checked at rep completion in _detect_rep().
+        """
+        return []
+
+
+class BicepCurlAnalyzer(ExerciseAnalyzer):
+    """
+    Bicep curl analyzer for side-view angles.
+    Works with only one arm visible.
+    
+    Rep detection: DOWN (extended) -> UP (flexed) -> DOWN = 1 rep
+    """
+    
+    ELBOW_DOWN_THRESHOLD = 160  # Arm extended
+    ELBOW_UP_THRESHOLD = 60     # Arm flexed
+    
+    def __init__(self, pose_detector: PoseDetector):
+        """Initialize bicep curl analyzer."""
+        super().__init__(pose_detector)
+        self.rep_phase = "down"
+        self.active_side = None
+    
+    def get_required_landmarks(self) -> List[str]:
+        """Required: shoulder, elbow, wrist (any side)."""
+        return [
+            "LEFT_SHOULDER", "RIGHT_SHOULDER",
+            "LEFT_ELBOW", "RIGHT_ELBOW",
+            "LEFT_WRIST", "RIGHT_WRIST"
+        ]
+    
+    def analyze(self, landmarks: np.ndarray, visibility: np.ndarray) -> Dict:
+        """Analyze bicep curl from whichever side is visible."""
+        self.feedback_messages = []
+        
+        # Detect which side is visible first
+        visible_side = self.pose_detector.detect_visible_side(visibility)
+        self.active_side = visible_side if visible_side != 'both' else 'right'
+        
+        # Validate only the visible side's landmarks
+        if self.active_side == "left":
+            required = ["LEFT_SHOULDER", "LEFT_ELBOW", "LEFT_WRIST"]
+        else:
+            required = ["RIGHT_SHOULDER", "RIGHT_ELBOW", "RIGHT_WRIST"]
+        
+        if not self.pose_detector.is_pose_valid(visibility, required, 0.1):
+            return {
+                'rep_count': self.rep_count,
+                'in_rep': False,
+                'feedback': ["Need arm visible"],
+                'form_status': {}
+            }
+        
+        # Analyze visible arm
+        elbow_angle = self._calculate_elbow_angle(landmarks, self.active_side)
+        
+        # Count reps
+        self._detect_rep(elbow_angle)
+        
+        # Form validation
+        form_issues = self._validate_form(elbow_angle)
+        
+        return {
+            'rep_count': self.rep_count,
+            'in_rep': self.in_rep,
+            'feedback': self.feedback_messages,
+            'form_status': {
+                'elbow_angle': elbow_angle,
+                'visible_side': self.active_side,
+                'form_issues': form_issues
+            }
+        }
+    
+    def _calculate_elbow_angle(self, landmarks: np.ndarray, side: str) -> float:
+        """Calculate elbow angle for the visible arm."""
+        if side == "left":
+            shoulder = self.pose_detector.get_landmark(landmarks, "LEFT_SHOULDER")
+            elbow = self.pose_detector.get_landmark(landmarks, "LEFT_ELBOW")
+            wrist = self.pose_detector.get_landmark(landmarks, "LEFT_WRIST")
+        else:
+            shoulder = self.pose_detector.get_landmark(landmarks, "RIGHT_SHOULDER")
+            elbow = self.pose_detector.get_landmark(landmarks, "RIGHT_ELBOW")
+            wrist = self.pose_detector.get_landmark(landmarks, "RIGHT_WRIST")
+        
+        return self.pose_detector.calculate_angle(shoulder, elbow, wrist)
+    
+    def _detect_rep(self, elbow_angle: float):
+        """Detect reps: flex and extend."""
+        if self.rep_phase == "down" and elbow_angle < self.ELBOW_UP_THRESHOLD:
             self.rep_phase = "up"
             self.in_rep = True
-            self.feedback_messages.append("Curling up...")
+            self.feedback_messages.append("Flexing...")
         
-        elif self.rep_phase == "up" and avg_elbow_angle > self.ELBOW_DOWN_THRESHOLD:
-            # Returned to down - rep complete!
+        elif self.rep_phase == "up" and elbow_angle > self.ELBOW_DOWN_THRESHOLD:
             self.rep_phase = "down"
             self.rep_count += 1
             self.in_rep = False
             self.feedback_messages.append(f"Rep {self.rep_count} complete!")
     
-    def _validate_form(self, left_elbow: float, right_elbow: float) -> List[str]:
-        """
-        Validate bicep curl form.
-        
-        Args:
-            left_elbow: Left arm elbow angle
-            right_elbow: Right arm elbow angle
-            
-        Returns:
-            List of form issues
-        """
+    def _validate_form(self, elbow_angle: float) -> List[str]:
+        """Validate bicep curl form."""
         issues = []
         
-        # Check arm symmetry
-        if abs(left_elbow - right_elbow) > 15:
-            issues.append("Arms are uneven - keep balanced")
+        # In side-view, we can't check symmetry, so just check range
+        if self.in_rep and elbow_angle > 100:
+            issues.append("Flex more")
         
         self.feedback_messages.extend(issues)
         return issues
