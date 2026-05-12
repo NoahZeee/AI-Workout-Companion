@@ -184,6 +184,14 @@ class FeedbackGenerator:
                        self.FONT_MONO, 0.65, angle_color, 1)
             content_y += line_height
         
+        # Visible side
+        if 'visible_side' in form_status:
+            side = form_status['visible_side']
+            side_text = f"Side: {side.upper()}"
+            cv2.putText(frame, side_text, (content_x, content_y),
+                       self.FONT_MONO, 0.65, self.COLOR_INFO, 1)
+            content_y += line_height
+        
         # Form status indicator
         form_issues = form_status.get('form_issues', [])
         if not form_issues:

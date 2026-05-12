@@ -123,7 +123,7 @@ class PushUpAnalyzer(ExerciseAnalyzer):
             'in_rep': self.in_rep,
             'feedback': self.feedback_messages,
             'form_status': {
-                'elbow_angle': elbow_angle,
+                'avg_elbow_angle': elbow_angle,
                 'visible_side': self.active_side,
                 'form_issues': form_issues
             }
@@ -230,7 +230,7 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
             'in_rep': self.in_rep,
             'feedback': self.feedback_messages,
             'form_status': {
-                'elbow_angle': elbow_angle,
+                'avg_elbow_angle': elbow_angle,
                 'visible_side': self.active_side,
                 'form_issues': form_issues
             }
