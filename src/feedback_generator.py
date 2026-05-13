@@ -58,19 +58,220 @@ class FeedbackGenerator:
         self.frame_count += 1
         frame_out = frame.copy()
         
-        # Draw semi-transparent overlay panel on right side (info panel)
-        self._draw_info_panel(frame_out, rep_count, form_status, in_rep)
-        
-        # Draw primary rep counter (large, prominent)
+        # Draw primary rep counter (large, color-coded, top center) - NEVER TOUCH AGAIN
         self._draw_rep_counter_large(frame_out, rep_count, in_rep)
         
-        # Draw feedback messages (left side, with color coding)
-        self._draw_feedback_messages(frame_out, feedback_messages)
+        # Draw consolidated info panel (feedback + metrics) in top-left corner
+        self._draw_consolidated_info_panel(frame_out, feedback_messages, form_status)
         
         # Draw form indicators on frame (visual cues)
         self._draw_form_indicators(frame_out, form_status)
         
         return frame_out
+    
+    def _draw_consolidated_info_panel(self, frame: np.ndarray, 
+                                     feedback_messages: List[str], 
+                                     form_status: Dict):
+        """
+        Draw unified panel with feedback messages and metrics in top-left corner.
+        Combines feedback and metrics into one panel to prevent flickering.
+        
+        Args:
+            frame: Frame to draw on
+            feedback_messages: List of feedback messages
+            form_status: Form metrics dict
+        """
+        # Adapt panel width to frame width (narrow frames get narrower panels)
+        # For portrait (width < height), use narrower panel
+        if self.width < self.height:
+            panel_width = max(280, self.width - 100)  # Leave margins for narrow frames
+        else:
+            panel_width = 380
+        
+        # Calculate panel height: messages + separator + metrics
+        message_count = len([m for m in feedback_messages if m])
+        metrics_lines = 0
+        if 'avg_elbow_angle' in form_status:
+            metrics_lines += 1
+        if 'visible_side' in form_status:
+            metrics_lines += 1
+        
+        # Always show panel with consistent height even if empty
+        panel_height = 40 + (message_count * 20)
+        if metrics_lines > 0:
+            panel_height += 25 + (metrics_lines * 20)  # Separator + metrics
+        
+        panel_x = 12
+        panel_y = self.height - panel_height - 12  # Position at bottom
+        
+        # Draw gradient-like background with border shadow
+        overlay = frame.copy()
+        # Outer shadow
+        cv2.rectangle(overlay, (panel_x - 1, panel_y - 1),
+                     (panel_x + panel_width + 1, panel_y + panel_height + 1),
+                     (10, 10, 15), -1)
+        # Main background
+        cv2.rectangle(overlay, (panel_x, panel_y),
+                     (panel_x + panel_width, panel_y + panel_height),
+                     (25, 28, 35), -1)
+        cv2.addWeighted(overlay, 0.9, frame, 0.1, 0, frame)
+        
+        # Draw modern border
+        cv2.rectangle(frame, (panel_x, panel_y),
+                     (panel_x + panel_width, panel_y + panel_height),
+                     self.COLOR_INFO, 2)
+        
+        # Draw content with modern styling
+        content_x = panel_x + 15
+        content_y = panel_y + 25
+        line_spacing = 20
+        
+        # Draw feedback messages
+        for msg in feedback_messages[:6]:
+            if msg:
+                # Determine color
+                if "Rep" in msg or "complete" in msg:
+                    color = self.COLOR_GOOD
+                elif "Keep" in msg or "elbow still" in msg:
+                    color = self.COLOR_ERROR
+                elif "Hips aligned" in msg or "Elbow locked" in msg:
+                    color = self.COLOR_GOOD
+                elif "deeper" in msg or "Curl more" in msg:
+                    color = self.COLOR_ERROR
+                else:
+                    color = self.COLOR_WARNING
+                
+                cv2.putText(frame, msg, (content_x, content_y),
+                           self.FONT_MONO, 0.6, color, 1)
+                content_y += line_spacing
+        
+        # Draw metrics in the same panel
+        if metrics_lines > 0:
+            content_y += 5
+            cv2.line(frame, (content_x, content_y), 
+                    (content_x + panel_width - 30, content_y),
+                    self.COLOR_NEUTRAL, 1)
+            content_y += 15
+            
+            if 'avg_elbow_angle' in form_status:
+                angle = form_status['avg_elbow_angle']
+                angle_text = f"Elbow: {angle:.0f}°"
+                cv2.putText(frame, angle_text, (content_x, content_y),
+                           self.FONT_MONO, 0.6, self.COLOR_INFO, 1)
+                content_y += line_spacing
+            
+            if 'visible_side' in form_status:
+                side = form_status['visible_side'].upper()
+                side_text = f"Side: {side}"
+                cv2.putText(frame, side_text, (content_x, content_y),
+                           self.FONT_MONO, 0.6, self.COLOR_INFO, 1)
+    
+    def _draw_feedback_panel(self, frame: np.ndarray, feedback_messages: List[str]):
+        """
+        Draw feedback messages panel in top-left corner.
+        
+        Args:
+            frame: Frame to draw on
+            feedback_messages: List of feedback messages
+        """
+        if not feedback_messages:
+            return
+        
+        # Panel dimensions - positioned at top-left
+        panel_width = 350
+        panel_height = 60 + (len(feedback_messages) * 22)
+        panel_x = 10
+        panel_y = 10
+        
+        # Draw semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (panel_x, panel_y),
+                     (panel_x + panel_width, panel_y + panel_height),
+                     self.COLOR_BG_DARK, -1)
+        cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
+        
+        # Draw border
+        cv2.rectangle(frame, (panel_x, panel_y),
+                     (panel_x + panel_width, panel_y + panel_height),
+                     self.COLOR_INFO, 1)
+        
+        # Draw feedback messages stacked vertically
+        message_y = panel_y + 15
+        for msg in feedback_messages[:6]:  # Limit to 6 messages
+            if msg:
+                # Determine color
+                if "Rep" in msg or "complete" in msg:
+                    color = self.COLOR_GOOD
+                elif "Keep hips" in msg or "deeper" in msg:
+                    color = self.COLOR_ERROR
+                else:
+                    color = self.COLOR_WARNING
+                
+                cv2.putText(frame, msg, (panel_x + 12, message_y),
+                           self.FONT_MONO, 0.55, color, 1)
+                message_y += 22
+    
+    
+    def _draw_consolidated_feedback(self, frame: np.ndarray, rep_count: int, 
+                                   feedback_messages: List[str], in_rep: bool):
+        """
+        Draw consolidated feedback panel at bottom center with rep counter and messages.
+        
+        Args:
+            frame: Frame to draw on
+            rep_count: Current rep count
+            feedback_messages: List of feedback messages
+            in_rep: Whether currently performing a rep
+        """
+        # Panel dimensions - wider for consolidated view
+        panel_width = 400
+        panel_height = 150 + (len(feedback_messages) * 25)
+        panel_x = (self.width - panel_width) // 2
+        panel_y = self.height - panel_height - 10
+        
+        # Draw semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (panel_x, panel_y),
+                     (panel_x + panel_width, panel_y + panel_height),
+                     self.COLOR_BG_DARK, -1)
+        cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+        
+        # Draw border
+        border_color = self.COLOR_WARNING if in_rep else self.COLOR_INFO
+        cv2.rectangle(frame, (panel_x, panel_y),
+                     (panel_x + panel_width, panel_y + panel_height),
+                     border_color, 2)
+        
+        # Draw rep counter (large, centered)
+        rep_text = str(rep_count)
+        text_size = cv2.getTextSize(rep_text, self.FONT_MAIN, 2.5, 2)[0]
+        rep_x = panel_x + (panel_width - text_size[0]) // 2
+        rep_y = panel_y + 45
+        cv2.putText(frame, rep_text, (rep_x, rep_y), self.FONT_MAIN, 
+                   2.5, self.COLOR_TEXT, 2)
+        
+        # Draw "REPS" label
+        label_size = cv2.getTextSize("REPS", self.FONT_MONO, 0.6, 1)[0]
+        label_x = panel_x + (panel_width - label_size[0]) // 2
+        label_y = panel_y + 20
+        cv2.putText(frame, "REPS", (label_x, label_y), self.FONT_MONO,
+                   0.6, self.COLOR_TEXT, 1)
+        
+        # Draw feedback messages stacked vertically
+        message_y = rep_y + 40
+        for msg in feedback_messages[:5]:  # Limit to 5 messages
+            if msg:
+                # Determine color
+                if "Rep" in msg or "complete" in msg:
+                    color = self.COLOR_GOOD
+                elif "Keep hips" in msg:
+                    color = self.COLOR_ERROR
+                else:
+                    color = self.COLOR_WARNING
+                
+                cv2.putText(frame, msg, (panel_x + 15, message_y),
+                           self.FONT_MONO, 0.55, color, 1)
+                message_y += 25
     
     def _draw_rep_counter_large(self, frame: np.ndarray, rep_count: int, in_rep: bool):
         """
@@ -194,12 +395,12 @@ class FeedbackGenerator:
         
         # Form status indicator
         form_issues = form_status.get('form_issues', [])
-        if not form_issues:
-            status_text = "✓ Good Form"
-            status_color = self.COLOR_GOOD
-        else:
-            status_text = f"⚠ {len(form_issues)} issue(s)"
+        if form_issues:
+            status_text = f"Issues: {len(form_issues)}"
             status_color = self.COLOR_ERROR
+        else:
+            status_text = "No issues"
+            status_color = self.COLOR_INFO
         
         cv2.putText(frame, status_text, (content_x, content_y),
                    self.FONT_MONO, 0.65, status_color, 1)

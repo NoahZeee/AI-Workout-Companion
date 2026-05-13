@@ -64,20 +64,24 @@ class PushUpAnalyzer(ExerciseAnalyzer):
     ELBOW_DOWN_THRESHOLD = 100   # Bottom of push-up
     ELBOW_UP_THRESHOLD = 150     # Top of push-up
     MIN_DEPTH_ANGLE = 90         # Minimum elbow bend for valid rep
+    HIP_SAG_TOLERANCE = 0.50     # Max body line deviation from straight (0-1 scale, ~18°)
     
     def __init__(self, pose_detector: PoseDetector):
         """Initialize push-up analyzer."""
         super().__init__(pose_detector)
         self.rep_phase = "up"
         self.max_depth_angle = 180
+        self.min_hip_alignment_error = float('inf')  # Track best alignment during rep
         self.active_side = None
+        self.hips_out_of_alignment = False  # Track persistent hip alignment state
     
     def get_required_landmarks(self) -> List[str]:
-        """Required landmarks: shoulders and one visible arm."""
+        """Required landmarks: shoulders, one visible arm, and hips for alignment check."""
         return [
             "LEFT_SHOULDER", "RIGHT_SHOULDER",
             "LEFT_ELBOW", "RIGHT_ELBOW",
-            "LEFT_WRIST", "RIGHT_WRIST"
+            "LEFT_WRIST", "RIGHT_WRIST",
+            "LEFT_HIP", "RIGHT_HIP"
         ]
     
     def analyze(self, landmarks: np.ndarray, visibility: np.ndarray) -> Dict:
@@ -93,9 +97,9 @@ class PushUpAnalyzer(ExerciseAnalyzer):
         
         # Validate only the visible side's landmarks + one shoulder
         if self.active_side == "left":
-            required = ["LEFT_SHOULDER", "LEFT_ELBOW", "LEFT_WRIST"]
+            required = ["LEFT_SHOULDER", "LEFT_ELBOW", "LEFT_WRIST", "LEFT_HIP", "RIGHT_HIP"]
         else:
-            required = ["RIGHT_SHOULDER", "RIGHT_ELBOW", "RIGHT_WRIST"]
+            required = ["RIGHT_SHOULDER", "RIGHT_ELBOW", "RIGHT_WRIST", "LEFT_HIP", "RIGHT_HIP"]
         
         if not self.pose_detector.is_pose_valid(visibility, required, 0.1):
             return {
@@ -112,8 +116,23 @@ class PushUpAnalyzer(ExerciseAnalyzer):
         if elbow_angle < self.max_depth_angle:
             self.max_depth_angle = elbow_angle
         
+        # Check hip alignment continuously
+        current_alignment_error = self._calculate_hip_alignment_error(landmarks)
+        self.hips_out_of_alignment = current_alignment_error > self.HIP_SAG_TOLERANCE
+        
+        # Track hip-shoulder alignment during rep (for validation at completion)
+        if self.rep_phase == "down":
+            if current_alignment_error < self.min_hip_alignment_error:
+                self.min_hip_alignment_error = current_alignment_error
+        
+        # Add hip alignment feedback (positive or negative)
+        if self.hips_out_of_alignment:
+            self.feedback_messages.append("Keep hips aligned!")
+        else:
+            self.feedback_messages.append("Hips aligned")
+        
         # Count reps
-        self._detect_rep(elbow_angle)
+        self._detect_rep(landmarks, elbow_angle)
         
         # Validate form
         form_issues = self._validate_form(landmarks, elbow_angle)
@@ -142,24 +161,76 @@ class PushUpAnalyzer(ExerciseAnalyzer):
         
         return self.pose_detector.calculate_angle(shoulder, elbow, wrist)
     
-    def _detect_rep(self, elbow_angle: float):
-        """Detect and count reps using state machine."""
+    def _calculate_hip_alignment_error(self, landmarks: np.ndarray) -> float:
+        """
+        Calculate body line alignment error.
+        For proper push-up form, body should form straight line: shoulder-hip-knee.
+        Uses knee instead of ankle (more visible during push-ups).
+        Returns deviation from 180° (straight line).
+        """
+        # Get average positions for symmetrical landmarks
+        left_shoulder = self.pose_detector.get_landmark(landmarks, "LEFT_SHOULDER")
+        right_shoulder = self.pose_detector.get_landmark(landmarks, "RIGHT_SHOULDER")
+        left_hip = self.pose_detector.get_landmark(landmarks, "LEFT_HIP")
+        right_hip = self.pose_detector.get_landmark(landmarks, "RIGHT_HIP")
+        left_knee = self.pose_detector.get_landmark(landmarks, "LEFT_KNEE")
+        right_knee = self.pose_detector.get_landmark(landmarks, "RIGHT_KNEE")
+        
+        # Average the bilateral landmarks
+        avg_shoulder = (left_shoulder + right_shoulder) / 2
+        avg_hip = (left_hip + right_hip) / 2
+        avg_knee = (left_knee + right_knee) / 2
+        
+        # Calculate angle formed by shoulder-hip-knee
+        # A straight body line = 180°
+        body_line_angle = self.pose_detector.calculate_angle(avg_shoulder, avg_hip, avg_knee)
+        
+        # Calculate deviation from 180° (perfect straight line)
+        angle_error = abs(180 - body_line_angle)
+        
+        # Normalize to 0-1 scale (0-45° error = acceptable)
+        # More lenient tolerance since knee is further from hip than ankle
+        # Clamp to [0, 1]
+        normalized_error = min(angle_error / 45.0, 1.0)
+        
+        return normalized_error
+    
+    def _detect_rep(self, landmarks: np.ndarray, elbow_angle: float):
+        """Detect and count reps using state machine with form validation."""
         if self.rep_phase == "up" and elbow_angle < self.ELBOW_DOWN_THRESHOLD:
             self.rep_phase = "down"
             self.in_rep = True
             self.max_depth_angle = elbow_angle
+            self.min_hip_alignment_error = float('inf')
             self.feedback_messages.append("Going down...")
         
         elif self.rep_phase == "down" and elbow_angle > self.ELBOW_UP_THRESHOLD:
-            # Check if rep reached adequate depth before counting
-            if self.max_depth_angle > self.MIN_DEPTH_ANGLE:
-                self.feedback_messages.append("Go deeper!")
+            # Validate depth
+            depth_valid = self.max_depth_angle <= self.MIN_DEPTH_ANGLE
             
-            self.rep_phase = "up"
-            self.rep_count += 1
-            self.in_rep = False
-            self.max_depth_angle = 180
-            self.feedback_messages.append(f"Rep {self.rep_count} complete!")
+            # Validate alignment
+            alignment_valid = self.min_hip_alignment_error <= self.HIP_SAG_TOLERANCE
+            
+            # Only count if both depth and alignment are good
+            if depth_valid and alignment_valid:
+                self.rep_phase = "up"
+                self.rep_count += 1
+                self.in_rep = False
+                self.max_depth_angle = 180
+                self.min_hip_alignment_error = float('inf')
+                self.feedback_messages.append(f"Rep {self.rep_count} complete!")
+            else:
+                # Failed rep - provide feedback without counting
+                if not depth_valid:
+                    self.feedback_messages.append("Go deeper!")
+                if not alignment_valid:
+                    self.feedback_messages.append("Keep hips aligned!")
+                
+                # Reset for next attempt
+                self.rep_phase = "up"
+                self.in_rep = False
+                self.max_depth_angle = 180
+                self.min_hip_alignment_error = float('inf')
     
     def _validate_form(self, landmarks: np.ndarray, elbow_angle: float) -> List[str]:
         """
@@ -175,16 +246,24 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
     Works with only one arm visible.
     
     Rep detection: DOWN (extended) -> UP (flexed) -> DOWN = 1 rep
+    Form criteria:
+      - Elbow flexion: <70 degrees
+      - Elbow alignment: elbow stays directly below shoulder (vertical)
     """
     
-    ELBOW_DOWN_THRESHOLD = 160  # Arm extended
-    ELBOW_UP_THRESHOLD = 60     # Arm flexed
+    ELBOW_DOWN_THRESHOLD = 140  # Arm extended (relaxed from 160)
+    ELBOW_UP_THRESHOLD = 80     # Arm flexed (relaxed from 70)
+    MIN_FLEX_ANGLE = 80         # Minimum elbow bend for valid rep (relaxed from 70)
+    ELBOW_ALIGNMENT_TOLERANCE = 0.60  # Max deviation from vertical (relaxed from 0.45, ~27° max)
     
     def __init__(self, pose_detector: PoseDetector):
         """Initialize bicep curl analyzer."""
         super().__init__(pose_detector)
         self.rep_phase = "down"
         self.active_side = None
+        self.max_flex_angle = 180  # Track best flex during rep
+        self.min_alignment_error = float('inf')  # Track best alignment during rep
+        self.elbow_out_of_alignment = False
     
     def get_required_landmarks(self) -> List[str]:
         """Required: shoulder, elbow, wrist (any side)."""
@@ -212,18 +291,33 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
             return {
                 'rep_count': self.rep_count,
                 'in_rep': False,
-                'feedback': ["Need arm visible"],
+                'feedback': ["Adjust view: arm not visible"],
                 'form_status': {}
             }
         
         # Analyze visible arm
         elbow_angle = self._calculate_elbow_angle(landmarks, self.active_side)
         
+        # Track best flex during rep
+        if elbow_angle < self.max_flex_angle:
+            self.max_flex_angle = elbow_angle
+        
+        # Check elbow alignment continuously
+        current_alignment_error = self._calculate_elbow_alignment_error(landmarks, self.active_side)
+        self.elbow_out_of_alignment = current_alignment_error > self.ELBOW_ALIGNMENT_TOLERANCE
+        
+        # Track best alignment during rep (for validation at completion)
+        if self.rep_phase == "up":
+            if current_alignment_error < self.min_alignment_error:
+                self.min_alignment_error = current_alignment_error
+        
+        # Add elbow alignment feedback
+        if self.elbow_out_of_alignment:
+            self.feedback_messages.append("Keep elbow still!")
+
+        
         # Count reps
         self._detect_rep(elbow_angle)
-        
-        # Form validation
-        form_issues = self._validate_form(elbow_angle)
         
         return {
             'rep_count': self.rep_count,
@@ -232,7 +326,7 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
             'form_status': {
                 'avg_elbow_angle': elbow_angle,
                 'visible_side': self.active_side,
-                'form_issues': form_issues
+                'alignment_error': current_alignment_error
             }
         }
     
@@ -249,26 +343,75 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
         
         return self.pose_detector.calculate_angle(shoulder, elbow, wrist)
     
+    def _calculate_elbow_alignment_error(self, landmarks: np.ndarray, side: str) -> float:
+        """
+        Calculate how well the elbow stays directly below the shoulder.
+        For proper bicep curl form, shoulder-to-elbow line should be vertical.
+        Returns deviation from vertical (0-1 scale).
+        """
+        if side == "left":
+            shoulder = self.pose_detector.get_landmark(landmarks, "LEFT_SHOULDER")
+            elbow = self.pose_detector.get_landmark(landmarks, "LEFT_ELBOW")
+        else:
+            shoulder = self.pose_detector.get_landmark(landmarks, "RIGHT_SHOULDER")
+            elbow = self.pose_detector.get_landmark(landmarks, "RIGHT_ELBOW")
+        
+        # Calculate vector from shoulder to elbow
+        shoulder_to_elbow = elbow - shoulder
+        
+        # For vertical alignment, x-component should be 0 (no horizontal drift)
+        # Calculate angle from vertical (0, 1) direction
+        horizontal_drift = abs(shoulder_to_elbow[0])
+        vertical_distance = abs(shoulder_to_elbow[1])
+        
+        # Avoid division by zero
+        if vertical_distance < 0.01:
+            return 1.0
+        
+        # Calculate angle from vertical using tangent
+        # angle_from_vertical = atan(horizontal_drift / vertical_distance)
+        # Normalized to 0-1 (0-45° deviation = acceptable)
+        angle_from_vertical = np.arctan2(horizontal_drift, vertical_distance) * 180 / np.pi
+        normalized_error = min(angle_from_vertical / 45.0, 1.0)
+        
+        return normalized_error
+    
     def _detect_rep(self, elbow_angle: float):
-        """Detect reps: flex and extend."""
+        """
+        Detect reps with form validation.
+        Rep must meet: minimum flex angle AND elbow alignment.
+        """
         if self.rep_phase == "down" and elbow_angle < self.ELBOW_UP_THRESHOLD:
             self.rep_phase = "up"
             self.in_rep = True
-            self.feedback_messages.append("Flexing...")
+            self.max_flex_angle = elbow_angle
+            self.min_alignment_error = float('inf')
+            self.feedback_messages.append("Curling up...")
         
         elif self.rep_phase == "up" and elbow_angle > self.ELBOW_DOWN_THRESHOLD:
-            self.rep_phase = "down"
-            self.rep_count += 1
-            self.in_rep = False
-            self.feedback_messages.append(f"Rep {self.rep_count} complete!")
-    
-    def _validate_form(self, elbow_angle: float) -> List[str]:
-        """Validate bicep curl form."""
-        issues = []
-        
-        # In side-view, we can't check symmetry, so just check range
-        if self.in_rep and elbow_angle > 100:
-            issues.append("Flex more")
-        
-        self.feedback_messages.extend(issues)
-        return issues
+            # Validate flex depth
+            flex_valid = self.max_flex_angle <= self.MIN_FLEX_ANGLE
+            
+            # Validate alignment
+            alignment_valid = self.min_alignment_error <= self.ELBOW_ALIGNMENT_TOLERANCE
+            
+            # Only count if both are valid
+            if flex_valid and alignment_valid:
+                self.rep_phase = "down"
+                self.rep_count += 1
+                self.in_rep = False
+                self.max_flex_angle = 180
+                self.min_alignment_error = float('inf')
+                self.feedback_messages.append(f"Rep {self.rep_count} complete!")
+            else:
+                # Failed rep - provide feedback
+                if not flex_valid:
+                    self.feedback_messages.append("Curl more!")
+                if not alignment_valid:
+                    self.feedback_messages.append("Keep elbow still!")
+                
+                # Reset for next attempt
+                self.rep_phase = "down"
+                self.in_rep = False
+                self.max_flex_angle = 180
+                self.min_alignment_error = float('inf')
