@@ -1,6 +1,16 @@
 """
 ExerciseAnalyzer: Exercise-specific analysis for rep counting and form feedback.
 Optimized for single-side (side-view) detection where only one arm is typically visible.
+
+STRUCTURE:
+  - ExerciseAnalyzer: Abstract base class for all exercises
+  - PushUpAnalyzer: Push-up rep counting and form validation (depth + hip alignment)
+  - BicepCurlAnalyzer: Bicep curl rep counting and form validation (flex + elbow alignment)
+
+To add a new exercise:
+  1. Subclass ExerciseAnalyzer
+  2. Implement analyze() and get_required_landmarks()
+  3. Register in src/main.py
 """
 
 from abc import ABC, abstractmethod
@@ -8,6 +18,10 @@ import numpy as np
 from typing import Dict, List
 from pose_detector import PoseDetector
 
+
+# ============================================================================
+# ABSTRACT BASE CLASS
+# ============================================================================
 
 class ExerciseAnalyzer(ABC):
     """
@@ -52,6 +66,10 @@ class ExerciseAnalyzer(ABC):
         self.in_rep = False
         self.feedback_messages = []
 
+
+# ============================================================================
+# PUSH-UP ANALYZER
+# ============================================================================
 
 class PushUpAnalyzer(ExerciseAnalyzer):
     """
@@ -239,6 +257,11 @@ class PushUpAnalyzer(ExerciseAnalyzer):
         """
         return []
 
+
+
+# ============================================================================
+# BICEP CURL ANALYZER
+# ============================================================================
 
 class BicepCurlAnalyzer(ExerciseAnalyzer):
     """
