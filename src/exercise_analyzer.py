@@ -277,7 +277,7 @@ class BicepCurlAnalyzer(ExerciseAnalyzer):
     ELBOW_DOWN_THRESHOLD = 140  # Arm extended (relaxed from 160)
     ELBOW_UP_THRESHOLD = 80     # Arm flexed (relaxed from 70)
     MIN_FLEX_ANGLE = 80         # Minimum elbow bend for valid rep (relaxed from 70)
-    ELBOW_ALIGNMENT_TOLERANCE = 0.60  # Max deviation from vertical (relaxed from 0.45, ~27° max)
+    ELBOW_ALIGNMENT_TOLERANCE = 0.70  # Max deviation from vertical (relaxed from 0.45, ~27° max)
     
     def __init__(self, pose_detector: PoseDetector):
         """Initialize bicep curl analyzer."""

@@ -15,13 +15,31 @@ python run.py --exercise bicep-curls --input workout.mp4 --output outputs/analys
 python run.py --help
 ```
 
+## Requirements
+
+**System Requirements:**
+- Python 3.8 or higher
+- 2GB RAM minimum
+- Webcam or video file input
+- Windows, macOS, or Linux
+
+**Dependencies:**
+- `opencv-python` (≥4.5.0) - Video I/O and frame processing
+- `mediapipe` (≥0.10.0) - Pose detection
+- `numpy` (≥1.19.0) - Numerical operations
+
 ## Installation
 
+```bash
+pip install -r requirements.txt
+```
+
+Or install manually:
 ```bash
 pip install opencv-python mediapipe numpy
 ```
 
-That's it. MediaPipe downloads automatically on first run (~5MB).
+MediaPipe automatically downloads its pose model (~5MB) on first run.
 
 ## Usage
 
@@ -100,6 +118,7 @@ Uses **state machine** based on joint angles:
 ### Project Structure
 ```
 ├── run.py                    # Entry point
+├── requirements.txt          # Python dependencies
 ├── src/
 │   ├── main.py              # CLI
 │   ├── pose_detector.py     # Pose detection
@@ -108,11 +127,7 @@ Uses **state machine** based on joint angles:
 │   └── video_processor.py   # Video pipeline
 ├── docs/
 │   └── README.md            # This file
-├── data/
-│   ├── curls_ex.mp4         # Test video
-│   ├── good_form.mp4        # Test data
-│   ├── bad_form.mp4         # Test data
-│   └── create_test_video.py # Video generator
+├── data/                     # Video files for analysis
 └── outputs/                 # Generated analysis videos
 ```
 
@@ -193,6 +208,38 @@ python run.py --exercise squats --input video.mp4
 **ModuleNotFoundError?**
 - Run `pip install opencv-python mediapipe numpy`
 - Use Python 3.8+
+
+## Limitations and Special Instructions
+
+### Camera Requirements
+- **Optimal angle**: Side-view camera (90° to body plane)
+- **Arm visibility**: Entire arm must be visible for analysis
+- **Single subject**: Designed for one person per video
+- **Lighting**: Good lighting recommended for pose detection accuracy
+
+### Detection Constraints
+- Minimum 50% pose detection confidence required for frame inclusion
+- Works best with clear, unobstructed body position
+- Does not detect multi-person workouts
+- No support for exercises with both arms performing the same motion (e.g., pushups vs diamond pushups)
+
+### Output Specifications
+- **Video Codec**: H.264 (MP4 format)
+- **Frame Rate**: Maintains input frame rate
+- **Resolution**: Supports any resolution; adaptive UI scaling for portrait/landscape
+- **File Size**: Output file size depends on input length and resolution
+
+### Processing Notes
+- **Real-time performance**: 33-36 FPS typical on modern hardware
+- **First run**: ~30-60 seconds for MediaPipe model download and initialization
+- **No GPU required**: Works on CPU; optional GPU acceleration available through MediaPipe
+- **Stateless**: Each frame analyzed independently; no multi-frame buffering
+
+### Form Validation Accuracy
+- Thresholds calibrated for natural, controlled movement
+- May require fine-tuning for individual body types or movement styles
+- Form feedback validates primary plane of motion (side-view optimized)
+- Provide clear, consistent movement patterns for best rep counting accuracy
 
 ## References
 
